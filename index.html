@@ -3,10 +3,11 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>TonConnect Point System - Fixed Version</title>
+    <title>TonConnect Point System - Telegram Integrated</title>
     <script src="https://unpkg.com/@tonconnect/ui@latest/dist/ton-connect-ui.min.js"></script>
+    <script src="https://telegram.org/js/telegram-web-app.js"></script>
     <style>
-        /* --- CSS styles --- */
+        /* --- CSS styles (unchanged from previous version) --- */
         body {
             font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
             background-color: #1a1a2e; /* Nền tối */
@@ -133,6 +134,12 @@
         <div id="connect-button-wrapper">
             </div>
 
+        <div id="telegram-info" class="info-box">
+            <h2>Telegram User:</h2>
+            <p id="telegram-username-display">Loading Telegram User...</p>
+            <p id="telegram-id-display"></p>
+        </div>
+
         <div id="wallet-status" class="info-box">
             <h2>Wallet Status:</h2>
             <p id="status-text">Not Connected</p>
@@ -140,9 +147,8 @@
         </div>
 
         <div id="user-info" class="info-box hidden">
-            <h2>Your Information:</h2>
-            <p><strong>Telegram Username:</strong> <span id="telegram-username-display">N/A</span></p>
-            <p><strong>Your Points:</strong> <span id="points-display">0</span></p>
+            <h2>Your Points:</h2>
+            <p><strong>Points:</strong> <span id="points-display">0</span></p>
             <p class="note"><i>Points are updated based on your transactions.</i></p>
         </div>
 
@@ -153,10 +159,33 @@
 
     <script>
         /* --- JavaScript logic --- */
+
+        // --- Telegram Web App API Initialization ---
+        // telegram.WebApp is available globally after loading telegram-web-app.js
+        let telegramUser = null;
+        if (window.Telegram && window.Telegram.WebApp) {
+            telegram.WebApp.ready(); // Inform Telegram that your app is ready
+            // Expand the web app to fill more space if needed
+            // telegram.WebApp.expand(); 
+
+            // Get user data from Telegram
+            if (telegram.WebApp.initDataUnsafe && telegram.WebApp.initDataUnsafe.user) {
+                telegramUser = telegram.WebApp.initDataUnsafe.user;
+                document.getElementById('telegram-username-display').innerText = `@${telegramUser.username || telegramUser.first_name || 'N/A'}`;
+                document.getElementById('telegram-id-display').innerText = `ID: ${telegramUser.id}`;
+            } else {
+                document.getElementById('telegram-username-display').innerText = 'Not launched from Telegram or user data unavailable.';
+                document.getElementById('telegram-id-display').innerText = '';
+            }
+        } else {
+            document.getElementById('telegram-username-display').innerText = 'Telegram Web App script not loaded or not in Telegram environment.';
+            document.getElementById('telegram-id-display').innerText = '';
+        }
+
         // Khởi tạo TonConnect UI
         const tonConnectUI = new TonConnectUI.TonConnectUI({
             // Đã cập nhật để sử dụng URL manifest của bạn
-            manifestUrl: 'https://bmweb.site/tonconnect-manifest.json',
+            manifestUrl: 'https://bmweb.site/tonconnect-manifest.json', // Đảm bảo URL này đúng và manifest có nội dung hợp lệ
             restoreConnection: true // Tự động khôi phục kết nối nếu có
         });
 
@@ -165,7 +194,6 @@
         const statusText = document.getElementById('status-text');
         const walletAddressDisplay = document.getElementById('wallet-address-display');
         const userInfoSection = document.getElementById('user-info');
-        const telegramUsernameDisplay = document.getElementById('telegram-username-display');
         const pointsDisplay = document.getElementById('points-display');
         const refreshDataButton = document.getElementById('refresh-data-button');
 
@@ -176,19 +204,34 @@
         });
 
         // --- Giả lập cơ sở dữ liệu trên localStorage ---
-        // Trong dự án thực tế, đây sẽ là backend server của bạn
-        const usersDatabase = {}; // Dùng object để lưu trữ tạm thời trong session
+        // TRONG DỰ ÁN THỰC TẾ, ĐÂY SẼ LÀ BACKEND SERVER CỦA BẠN.
+        // Bạn sẽ gửi telegramUser.id và walletAddress đến backend để lưu trữ.
+        const usersDatabase = {}; 
 
-        function saveUserData(walletAddress, username, points) {
+        function saveUserData(walletAddress, telegramId, username, points) {
+            // Tải từ localStorage nếu có để tránh mất dữ liệu cũ khi khởi tạo lại
+            const storedData = localStorage.getItem('usersDatabase');
+            if (storedData) {
+                Object.assign(usersDatabase, JSON.parse(storedData));
+            }
+
             if (!usersDatabase[walletAddress]) {
                 usersDatabase[walletAddress] = {
+                    telegramId: telegramId,
                     username: username,
                     points: points
                 };
-                console.log(`Saved new user: ${walletAddress}`);
+                console.log(`Saved new user: ${walletAddress}, Telegram ID: ${telegramId}`);
             } else {
                 // Cập nhật nếu đã tồn tại (ví dụ: điểm)
                 usersDatabase[walletAddress].points = points;
+                // Cập nhật username/telegramId nếu chúng thay đổi hoặc được biết thêm
+                if (telegramId && !usersDatabase[walletAddress].telegramId) {
+                    usersDatabase[walletAddress].telegramId = telegramId;
+                }
+                if (username && !usersDatabase[walletAddress].username) {
+                    usersDatabase[walletAddress].username = username;
+                }
                 console.log(`Updated user: ${walletAddress}`);
             }
             // Lưu vào localStorage để duy trì qua các lần refresh (trong môi trường thật thì lưu ở server)
@@ -210,7 +253,12 @@
             let currentPoints = userData ? userData.points : 0;
             // Giả lập tăng điểm mỗi khi gọi hàm này (thay thế bằng logic check transaction thực tế)
             const newPoints = currentPoints + Math.floor(Math.random() * 10) + 1; // Thêm 1-10 điểm ngẫu nhiên
-            saveUserData(walletAddress, userData ? userData.username : 'Unknown User', newPoints);
+            
+            // Lấy lại username và telegramId từ userData hoặc từ telegramUser nếu có
+            const currentTelegramId = userData ? userData.telegramId : (telegramUser ? telegramUser.id : null);
+            const currentUsername = userData ? userData.username : (telegramUser ? (telegramUser.username || telegramUser.first_name) : 'Unknown User');
+
+            saveUserData(walletAddress, currentTelegramId, currentUsername, newPoints);
             return newPoints;
         }
 
@@ -223,17 +271,31 @@
                 userInfoSection.classList.remove('hidden');
                 refreshDataButton.classList.remove('hidden');
 
-                // Giả lập lấy và hiển thị dữ liệu từ "database"
+                // --- Gửi dữ liệu về backend (GIẢ LẬP) ---
+                // Đây là nơi bạn sẽ gửi userFriendlyAddress, telegramUser.id và telegramUser.username
+                // đến API backend của bạn để lưu vào cơ sở dữ liệu.
+                // Ví dụ:
+                // fetch('/api/link-wallet', {
+                //     method: 'POST',
+                //     headers: { 'Content-Type': 'application/json' },
+                //     body: JSON.stringify({
+                //         walletAddress: userFriendlyAddress,
+                //         telegramId: telegramUser ? telegramUser.id : null,
+                //         telegramUsername: telegramUser ? (telegramUser.username || telegramUser.first_name) : null
+                //     })
+                // }).then(response => response.json())
+                //   .then(data => console.log('Backend response:', data));
+
+                // Giả lập lưu và hiển thị dữ liệu từ "database"
                 let userData = getUserData(userFriendlyAddress);
                 if (!userData) {
                     // Nếu chưa có dữ liệu, giả lập đây là lần đầu kết nối
-                    const defaultUsername = `User_${userFriendlyAddress.substring(0, 6)}`;
-                    saveUserData(userFriendlyAddress, defaultUsername, 0); // Khởi tạo điểm là 0
+                    const defaultUsername = telegramUser ? (telegramUser.username || telegramUser.first_name) : `User_${userFriendlyAddress.substring(0, 6)}`;
+                    saveUserData(userFriendlyAddress, telegramUser ? telegramUser.id : null, defaultUsername, 0); // Khởi tạo điểm là 0
                     userData = getUserData(userFriendlyAddress);
                 }
 
-                // Cập nhật hiển thị
-                telegramUsernameDisplay.innerText = userData.username;
+                // Cập nhật hiển thị điểm
                 pointsDisplay.innerText = userData.points;
 
             } else {
@@ -242,7 +304,6 @@
                 walletAddressDisplay.innerText = '';
                 userInfoSection.classList.add('hidden');
                 refreshDataButton.classList.add('hidden');
-                telegramUsernameDisplay.innerText = 'N/A';
                 pointsDisplay.innerText = '0';
             }
         });
