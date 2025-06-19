@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>TonPointBot - Fixed Connection</title>
+    <title>TonPointBot - Fixed Transaction Points</title>
 
     <script src="https://unpkg.com/@tonconnect/ui@latest/dist/tonconnect-ui.min.js"></script>
     <script src="https://telegram.org/js/telegram-web-app.js"></script>
@@ -171,7 +171,7 @@
         <div id="user-info" class="info-box hidden">
             <h2>Điểm của bạn:</h2>
             <p><strong>Điểm:</strong> <span id="points-display">0</span></p>
-            <p class="note"><i>Điểm được cập nhật dựa trên số giao dịch nhận được.</i></p>
+            <p class="note"><i>Điểm được cập nhật dựa trên số giao dịch nhận được từ TonAPI.io.</i></p>
         </div>
 
         <button id="refresh-data-button" class="action-button hidden">Làm mới dữ liệu & Điểm</button>
@@ -180,7 +180,7 @@
     </div>
 
     <script>
-        /* --- JavaScript Logic (đã được tối ưu và sửa lỗi) --- */
+        /* --- JavaScript Logic --- */
 
         let telegramUser = null; // Biến global để lưu thông tin người dùng Telegram
 
@@ -230,7 +230,7 @@
         const pointsDisplay = document.getElementById('points-display');
         const refreshDataButton = document.getElementById('refresh-data-button');
 
-        // --- 4. Giả lập cơ sở dữ liệu trên localStorage (Cho mục đích demo frontend) ---
+        // --- 4. Giả lập cơ sở dữ liệu trên localStorage ---
         let usersDatabase = JSON.parse(localStorage.getItem('usersDatabase')) || {};
 
         function saveUserData(walletAddress, telegramId, username, points) {
@@ -241,11 +241,13 @@
                 usersDatabase[walletAddress] = {
                     telegramId: telegramId,
                     username: username,
-                    points: points
+                    points: points,
+                    lastCheckedTransactions: 0 // Lưu số giao dịch cuối cùng để so sánh
                 };
                 console.log(`Đã tạo entry người dùng mới: ${walletAddress}`);
             } else {
                 usersDatabase[walletAddress].points = points;
+                // Cập nhật thông tin Telegram nếu có hoặc thay đổi
                 if (telegramId && usersDatabase[walletAddress].telegramId !== telegramId) {
                     usersDatabase[walletAddress].telegramId = telegramId;
                     console.log(`Đã cập nhật ID Telegram cho ${walletAddress}`);
@@ -265,20 +267,72 @@
             return usersDatabase[walletAddress];
         }
 
-        // Giả lập tính toán điểm (thay thế bằng logic check giao dịch thực tế trên backend)
-        function simulatePointsCalculation(walletAddress) {
-            let userData = getUserData(walletAddress);
-            let currentPoints = userData ? userData.points : 0;
-            const newPoints = currentPoints + Math.floor(Math.random() * 10) + 1;
+        // --- 5. Hàm lấy giao dịch và tính điểm từ TonAPI.io ---
+        async function fetchAndCalculatePointsFromTonAPI(walletAddress) {
+            console.log(`Đang lấy giao dịch cho ví: ${walletAddress} từ TonAPI.io...`);
+            pointsDisplay.innerText = 'Đang tải...'; // Hiển thị trạng thái tải
 
-            const currentTelegramId = telegramUser ? telegramUser.id : (userData ? userData.telegramId : null);
-            const currentUsername = telegramUser ? (telegramUser.username || telegramUser.first_name) : (userData ? userData.username : 'Unknown User');
+            // LƯU Ý QUAN TRỌNG:
+            // API Key: TonAPI.io có thể yêu cầu API Key cho giới hạn truy vấn cao hơn.
+            // Nếu bạn dùng API Key, KHÔNG ĐẶT NÓ TRỰC TIẾP VÀO ĐÂY TRONG PRODUCTION.
+            // HÃY SỬ DỤNG BACKEND SERVER ĐỂ GỌI API NÀY.
+            // VD: const API_KEY = 'YOUR_TONAPI_API_KEY';
+            //     const headers = API_KEY ? { 'Authorization': `Bearer ${API_KEY}` } : {};
 
-            saveUserData(walletAddress, currentTelegramId, currentUsername, newPoints);
-            return newPoints;
+            try {
+                // Lấy 100 giao dịch gần nhất. Bạn có thể cần xử lý phân trang
+                // nếu muốn tính điểm từ TẤT CẢ giao dịch từ đầu.
+                const response = await fetch(`https://tonapi.io/v2/accounts/${walletAddress}/transactions?limit=100`, {
+                    // headers: headers // Uncomment nếu dùng API Key
+                });
+
+                if (!response.ok) {
+                    throw new Error(`Lỗi HTTP: ${response.status} - ${response.statusText}`);
+                }
+
+                const data = await response.json();
+                // console.log('Dữ liệu giao dịch từ TonAPI:', data);
+
+                let incomingTransactionsCount = 0;
+                if (data.transactions && Array.isArray(data.transactions)) {
+                    // Đếm các giao dịch mà tài khoản này là người nhận
+                    // Một giao dịch được tính là "nhận" nếu có `in_msg` (tin nhắn vào)
+                    // và địa chỉ nhận của tin nhắn đó trùng với địa chỉ ví của người dùng
+                    // và địa chỉ gửi KHÔNG PHẢI là chính địa chỉ ví đó (tránh self-transfer)
+                    incomingTransactionsCount = data.transactions.filter(tx => {
+                        return tx.in_msg &&
+                               tx.in_msg.destination &&
+                               tx.in_msg.destination.address === walletAddress &&
+                               tx.in_msg.source && // Đảm bảo có nguồn
+                               tx.in_msg.source.address !== walletAddress; // Không phải tự gửi
+                    }).length;
+
+                    // Hoặc đơn giản hơn là đếm tất cả các giao dịch mà có tin nhắn vào (in_msg)
+                    // incomingTransactionsCount = data.transactions.filter(tx => tx.in_msg).length;
+                }
+
+                console.log(`Số giao dịch nhận được: ${incomingTransactionsCount}`);
+
+                // Lấy thông tin Telegram từ biến global `telegramUser` hoặc từ dữ liệu đã lưu
+                const currentTelegramId = telegramUser ? telegramUser.id : (getUserData(walletAddress)?.telegramId || null);
+                const currentUsername = telegramUser ? (telegramUser.username || telegramUser.first_name) : (getUserData(walletAddress)?.username || 'Unknown User');
+
+                // Điểm = số giao dịch nhận được
+                const newPoints = incomingTransactionsCount;
+                saveUserData(walletAddress, currentTelegramId, currentUsername, newPoints);
+
+                pointsDisplay.innerText = newPoints;
+                return newPoints;
+
+            } catch (error) {
+                console.error('Lỗi khi lấy dữ liệu giao dịch từ TonAPI.io:', error);
+                pointsDisplay.innerText = 'Lỗi!';
+                alert('Không thể tải dữ liệu giao dịch. Vui lòng kiểm tra console.');
+                return getUserData(walletAddress)?.points || 0; // Trả về điểm đã lưu nếu lỗi
+            }
         }
 
-        // --- 5. Xử lý trạng thái kết nối ví (TonConnect UI Event Listener) ---
+        // --- 6. Xử lý trạng thái kết nối ví (TonConnect UI Event Listener) ---
         tonConnectUI.onStatusChange(async (wallet) => {
             console.log('Trạng thái TonConnect UI thay đổi:', wallet);
             if (wallet) {
@@ -292,45 +346,11 @@
                 // Tại đây, bạn có: wallet.account.address, telegramUser.id, telegramUser.username
                 // Gửi thông tin này về backend để:
                 // 1. Liên kết ví với Telegram ID.
-                // 2. Yêu cầu backend kiểm tra giao dịch và tính điểm.
+                // 2. Yêu cầu backend kiểm tra giao dịch và tính điểm (tốt nhất là backend làm việc này).
                 // 3. Backend trả về điểm để frontend hiển thị.
-                //
-                // Ví dụ fetch API (bạn sẽ uncomment và thay thế bằng code của bạn):
-                // try {
-                //     const response = await fetch('/api/get-or-create-user-points', {
-                //         method: 'POST',
-                //         headers: { 'Content-Type': 'application/json' },
-                //         body: JSON.stringify({
-                //             walletAddress: userFriendlyAddress,
-                //             telegramId: telegramUser ? telegramUser.id : null,
-                //             telegramUsername: telegramUser ? (telegramUser.username || telegramUser.first_name) : null
-                //         })
-                //     });
-                //     const data = await response.json();
-                //     if (data.success) {
-                //         pointsDisplay.innerText = data.points;
-                //         saveUserData(userFriendlyAddress, telegramUser ? telegramUser.id : null, telegramUser ? telegramUser.username : null, data.points);
-                //     } else {
-                //         console.error('Lỗi khi lấy điểm từ backend:', data.message);
-                //         pointsDisplay.innerText = 'Lỗi!';
-                //     }
-                // } catch (error) {
-                //     console.error('Không thể kết nối backend:', error);
-                //     pointsDisplay.innerText = 'Lỗi kết nối!';
-                // }
 
-                // Giả lập lấy và hiển thị dữ liệu từ "database" (localStorage)
-                let userData = getUserData(userFriendlyAddress);
-                if (!userData) {
-                    console.log('Không tìm thấy dữ liệu người dùng hiện có, tạo entry mới.');
-                    const defaultUsername = telegramUser ? (telegramUser.username || telegramUser.first_name) : `User_${userFriendlyAddress.substring(0, 6)}`;
-                    saveUserData(userFriendlyAddress, telegramUser ? telegramUser.id : null, defaultUsername, 0);
-                    userData = getUserData(userFriendlyAddress);
-                } else {
-                    console.log('Đã tìm thấy dữ liệu người dùng hiện có:', userData);
-                }
-
-                pointsDisplay.innerText = userData.points;
+                // Gọi hàm lấy điểm từ TonAPI.io khi ví được kết nối
+                await fetchAndCalculatePointsFromTonAPI(userFriendlyAddress);
 
             } else {
                 console.log('Trạng thái TonConnect UI: Chưa kết nối');
@@ -342,25 +362,19 @@
             }
         });
 
-        // --- 6. Xử lý nút làm mới ---
-        refreshDataButton.addEventListener('click', () => {
+        // --- 7. Xử lý nút làm mới ---
+        refreshDataButton.addEventListener('click', async () => {
             console.log('Nút "Làm mới dữ liệu & Điểm" đã được nhấn.');
             const connectedWallet = tonConnectUI.wallet;
             if (connectedWallet) {
                 const userFriendlyAddress = connectedWallet.account.address;
-                const newPoints = simulatePointsCalculation(userFriendlyAddress);
-                pointsDisplay.innerText = newPoints;
-                alert('Dữ liệu đã được làm mới! Điểm đã được cập nhật.');
+                // Gọi lại hàm lấy điểm từ TonAPI.io khi nhấn nút làm mới
+                const newPoints = await fetchAndCalculatePointsFromTonAPI(userFriendlyAddress);
+                alert(`Dữ liệu đã được làm mới! Điểm của bạn: ${newPoints}.`);
             } else {
                 alert('Vui lòng kết nối ví của bạn trước!');
             }
         });
-
-        // The provided `connectToWallet` function and `tonConnectUI.uiOptions` were not
-        // directly integrated as separate function calls because TonConnectUI
-        // handles rendering the button and managing the connection flow automatically
-        // when `buttonRootId` is set and `onStatusChange` is used.
-        // The `twaReturnUrl` is correctly placed within `tonConnectUI.uiOptions`.
     </script>
 </body>
 </html>
