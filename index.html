@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>TonConnect Point System - Single File</title>
+    <title>TonConnect Point System - Fixed Version</title>
     <script src="https://unpkg.com/@tonconnect/ui@latest/dist/ton-connect-ui.min.js"></script>
     <style>
         /* --- CSS styles --- */
@@ -155,8 +155,7 @@
         /* --- JavaScript logic --- */
         // Khởi tạo TonConnect UI
         const tonConnectUI = new TonConnectUI.TonConnectUI({
-            // Bạn CẦN thay thế bằng manifest URL của bạn
-            // Ví dụ: 'https://your-domain.com/tonconnect-manifest.json'
+            // Đã cập nhật để sử dụng URL manifest của bạn
             manifestUrl: 'https://bmweb.site/tonconnect-manifest.json',
             restoreConnection: true // Tự động khôi phục kết nối nếu có
         });
@@ -223,26 +222,6 @@
                 walletAddressDisplay.innerText = `Address: ${userFriendlyAddress}`;
                 userInfoSection.classList.remove('hidden');
                 refreshDataButton.classList.remove('hidden');
-
-                // --- Giả lập việc lấy thông tin từ backend ---
-                // Trong dự án thực tế, bạn sẽ gọi một API endpoint ở đây:
-                // fetch(`/api/get_user_info?walletAddress=${userFriendlyAddress}`)
-                //   .then(response => response.json())
-                //   .then(data => {
-                //     if (data.success) {
-                //       telegramUsernameDisplay.innerText = data.username;
-                //       pointsDisplay.innerText = data.points;
-                //       saveUserData(userFriendlyAddress, data.username, data.points); // Lưu lại vào giả lập DB
-                //     } else {
-                //       telegramUsernameDisplay.innerText = 'N/A';
-                //       pointsDisplay.innerText = 'Error fetching points.';
-                //     }
-                //   })
-                //   .catch(error => {
-                //     console.error('Error fetching user data:', error);
-                //     telegramUsernameDisplay.innerText = 'Error';
-                //     pointsDisplay.innerText = 'Error';
-                //   });
 
                 // Giả lập lấy và hiển thị dữ liệu từ "database"
                 let userData = getUserData(userFriendlyAddress);
